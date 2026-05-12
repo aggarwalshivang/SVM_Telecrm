@@ -399,6 +399,14 @@ button.icon-btn:hover {
     gap: 4px;
 }
 
+.message-media {
+    max-width: 100%;
+    border-radius: 6px;
+    margin-bottom: 4px;
+    object-fit: cover;
+    max-height: 300px;
+}
+
 .message-row.inbound .message-bubble {
     background: var(--bubble-in);
     border-top-left-radius: 0;
@@ -457,9 +465,69 @@ button.icon-btn:hover {
     background: var(--bg-sidebar);
     border-top: 1px solid var(--border);
     display: flex;
+    flex-direction: column;
     gap: 12px;
-    align-items: flex-end;
     z-index: 10;
+}
+
+.input-container-main {
+    display: flex;
+    gap: 12px;
+    width: 100%;
+    align-items: flex-end;
+}
+
+.attachment-preview {
+    background: #222;
+    padding: 8px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: fit-content;
+    position: relative;
+    animation: slideUp 0.2s ease-out;
+}
+
+.attachment-preview img {
+    height: 40px;
+    width: 40px;
+    object-fit: cover;
+    border-radius: 4px;
+}
+
+.attachment-preview span {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.btn-clear-attachment {
+    background: #333;
+    border: none;
+    color: var(--text-main);
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 14px;
+    transition: background 0.2s;
+}
+
+.btn-clear-attachment:hover {
+    background: var(--danger);
+}
+
+@keyframes slideUp {
+    from { transform: translateY(10px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
 }
 
 .input-wrapper {

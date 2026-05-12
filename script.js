@@ -17,8 +17,8 @@ let state = {
     isPolling: false,
     pollTimer: null,
     searchQuery: '',
-    demoMode: false,
-    readTimestamps: JSON.parse(localStorage.getItem('wad_read_timestamps')) || {}
+    readTimestamps: JSON.parse(localStorage.getItem('wad_read_timestamps')) || {},
+    pendingMediaUrl: null
 };
 
 // DOM Elements
@@ -45,7 +45,13 @@ const DOM = {
     syncIndicator: document.getElementById('syncIndicator'),
     syncText: document.getElementById('syncText'),
     demoBanner: document.getElementById('demoBanner'),
-    toastContainer: document.getElementById('toastContainer')
+    toastContainer: document.getElementById('toastContainer'),
+    btnAttach: document.getElementById('btnAttach'),
+    attachmentPreview: document.getElementById('attachmentPreview'),
+    previewImg: document.getElementById('previewImg'),
+    previewName: document.getElementById('previewName'),
+    btnClearAttachment: document.getElementById('btnClearAttachment'),
+    fileInput: document.getElementById('fileInput')
 };
 
 /**
@@ -114,6 +120,64 @@ function setupEventListeners() {
     });
 
     DOM.btnSend.addEventListener('click', triggerSend);
+
+    // Attachments
+    DOM.btnAttach.addEventListener('click', () => {
+        DOM.fileInput.click();
+    });
+
+    DOM.fileInput.addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        if (state.demoMode) {
+            showToast('Cannot upload in Demo Mode', 'warning');
+            return;
+        }
+
+        try {
+            showToast('Uploading image...', 'info');
+            DOM.btnAttach.disabled = true;
+
+            const fileExt = file.name.split('.').pop();
+            const fileName = `outbound/${Date.now()}.${fileExt}`;
+            const bucket = 'telecrm'; // Change this if your bucket name is different
+
+            const url = `${config.supabaseUrl}/storage/v1/object/${bucket}/${fileName}`;
+            
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${config.supabaseAnonKey}`,
+                    'apikey': config.supabaseAnonKey,
+                    'Content-Type': file.type
+                },
+                body: file
+            });
+
+            if (!res.ok) throw new Error('Upload failed');
+
+            const publicUrl = `${config.supabaseUrl}/storage/v1/object/public/${bucket}/${fileName}`;
+            
+            state.pendingMediaUrl = publicUrl;
+            DOM.previewImg.src = publicUrl;
+            DOM.previewName.textContent = file.name;
+            DOM.attachmentPreview.style.display = 'flex';
+            showToast('Image uploaded', 'success');
+        } catch (err) {
+            console.error('Upload error:', err);
+            showToast('Failed to upload image', 'error');
+        } finally {
+            DOM.btnAttach.disabled = false;
+            DOM.fileInput.value = ''; // Reset input
+        }
+    });
+
+    DOM.btnClearAttachment.addEventListener('click', () => {
+        state.pendingMediaUrl = null;
+        DOM.attachmentPreview.style.display = 'none';
+        DOM.previewImg.src = '';
+    });
 
     // Search
     DOM.searchInput.addEventListener('input', (e) => {
@@ -286,7 +350,8 @@ async function fetchMessages(phone) {
 
 async function triggerSend() {
     const text = DOM.messageInput.value.trim();
-    if (!text || !state.activeContactId) return;
+    const mediaUrl = state.pendingMediaUrl;
+    if ((!text && !mediaUrl) || !state.activeContactId) return;
 
     const contact = state.contacts.find(c => c.id === state.activeContactId);
     if (!contact) return;
@@ -299,6 +364,7 @@ async function triggerSend() {
         name: contact.name,
         direction: 'outbound',
         body: text,
+        media_url: mediaUrl,
         timestamp: new Date().toISOString()
     };
 
@@ -310,11 +376,16 @@ async function triggerSend() {
     DOM.messageInput.value = '';
     DOM.messageInput.style.height = 'auto';
     DOM.btnSend.disabled = true;
-    renderChat();
+    
+    // Clear attachment
+    state.pendingMediaUrl = null;
+    DOM.attachmentPreview.style.display = 'none';
+    
+    renderChat(true);
 
     if (state.demoMode) {
         setTimeout(() => {
-            renderChat();
+            renderChat(true);
             showToast('Demo mode: message sent', 'success');
         }, 1000);
         return;
@@ -333,7 +404,8 @@ async function triggerSend() {
             body: JSON.stringify({
                 to: contact.phone,
                 name: contact.name || '',
-                message: text
+                message: text,
+                media_url: mediaUrl
             })
         });
 
@@ -341,7 +413,7 @@ async function triggerSend() {
 
         // Assume success if webhook responds 2xx
         showToast('Message sent', 'success');
-        renderChat();
+        renderChat(true);
 
         // Force a poll to sync the DB status
         setTimeout(() => pollTick(true), 2000);
@@ -351,7 +423,7 @@ async function triggerSend() {
         showToast('Failed to send message', 'error');
         // Remove optimistic message or mark as failed
         state.messagesByContact[contact.id] = state.messagesByContact[contact.id].filter(m => m.id !== tempId);
-        renderChat();
+        renderChat(true);
         // Restore text
         DOM.messageInput.value = text;
     }
@@ -455,13 +527,13 @@ function selectContact(id) {
     if (!state.messagesByContact[id]) {
         DOM.chatMessages.innerHTML = '<div class="empty-state">Loading messages...</div>';
     } else {
-        renderChat();
+        renderChat(true);
     }
 
     if (!state.demoMode) {
         fetchMessages(id);
     } else {
-        renderChat();
+        renderChat(true);
     }
 }
 
@@ -515,7 +587,7 @@ function renderSidebar() {
     DOM.contactList.innerHTML = html;
 }
 
-function renderChat() {
+function renderChat(forceScrollBottom = false) {
     if (!state.activeContactId) return;
     const msgs = state.messagesByContact[state.activeContactId] || [];
 
@@ -523,6 +595,13 @@ function renderChat() {
         DOM.chatMessages.innerHTML = '<div class="empty-state">No messages yet. Say hello!</div>';
         return;
     }
+
+    // Capture current scroll state before modifying innerHTML
+    const prevScrollTop = DOM.chatMessages.scrollTop;
+    const prevScrollHeight = DOM.chatMessages.scrollHeight;
+    const clientHeight = DOM.chatMessages.clientHeight;
+    // Allow a 50px buffer to consider user "at bottom"
+    const isAtBottom = prevScrollHeight - prevScrollTop <= clientHeight + 50;
 
     let html = '';
     let lastDate = null;
@@ -547,9 +626,15 @@ function renderChat() {
 
         const timeStr = msgDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
+        let mediaHtml = '';
+        if (m.media_url) {
+            mediaHtml = `<img src="${escapeHTML(m.media_url)}" class="message-media" alt="Image attachment" loading="lazy" />`;
+        }
+
         html += `
         <div class="message-row ${m.direction}">
             <div class="message-bubble">
+                ${mediaHtml}
                 <div class="message-body">${escapeHTML(m.body)}</div>
                 <div class="message-meta">
                     <span class="message-time">${timeStr}</span>
@@ -561,9 +646,14 @@ function renderChat() {
 
     DOM.chatMessages.innerHTML = html;
 
-    // Scroll to bottom safely
+    // Scroll safely
     requestAnimationFrame(() => {
-        DOM.chatMessages.scrollTop = DOM.chatMessages.scrollHeight;
+        if (forceScrollBottom || isAtBottom) {
+            DOM.chatMessages.scrollTop = DOM.chatMessages.scrollHeight;
+        } else {
+            // Restore previous scroll position to prevent jumping
+            DOM.chatMessages.scrollTop = prevScrollTop;
+        }
     });
 }
 
@@ -611,7 +701,7 @@ function loadDemoData() {
         '9434836393': [
             { id: 'm1', phone: '9434836393', name: 'Ankit', direction: 'inbound', body: 'Hi, I would like to know more about your services.', timestamp: new Date(Date.now() - 3600000).toISOString() },
             { id: 'm2', phone: '9434836393', name: 'Ankit', direction: 'outbound', body: 'Hello Ankit! Sure, what specific services are you interested in?', timestamp: new Date(Date.now() - 3000000).toISOString() },
-            { id: 'm3', phone: '9434836393', name: 'Ankit', direction: 'inbound', body: 'I am looking for lead generation.', timestamp: new Date().toISOString() }
+            { id: 'm3', phone: '9434836393', name: 'Ankit', direction: 'inbound', body: 'Here is my reference design.', media_url: 'https://images.unsplash.com/photo-1555041469-a586c61ea9bc?w=500&q=80', timestamp: new Date().toISOString() }
         ],
         '919876543210': [
             { id: 'm4', phone: '919876543210', name: 'Alice Smith', direction: 'outbound', body: 'Great Alice! Would you like to schedule a quick call?', timestamp: new Date(Date.now() - 3500000).toISOString() }
