@@ -6,7 +6,8 @@ let config = {
     supabaseAnonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt3enl3Y3lqYmF3aHRvbXN3d3R0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg1MjI5ODMsImV4cCI6MjA5NDA5ODk4M30.VSt5R7v5kesVIdczXkJjtQH8zklxV9If_4oai0-nKck',
     sendWebhookUrl: 'https://n8n.saraswatividyamandir.com/webhook/telecrm',
     pollIntervalSeconds: 10,
-    authHeader: ''
+    authHeader: '',
+    pin: 'svmn8n151'
 };
 
 let state = {
@@ -16,7 +17,8 @@ let state = {
     isPolling: false,
     pollTimer: null,
     searchQuery: '',
-    demoMode: false
+    demoMode: false,
+    readTimestamps: JSON.parse(localStorage.getItem('wad_read_timestamps')) || {}
 };
 
 // DOM Elements
@@ -73,6 +75,12 @@ function setupEventListeners() {
     document.getElementById('btnCloseSettings').addEventListener('click', hideSettings);
     document.getElementById('btnCancelSettings').addEventListener('click', hideSettings);
     document.getElementById('btnSaveSettings').addEventListener('click', saveConfig);
+
+    // Logout
+    document.getElementById('btnLogout').addEventListener('click', () => {
+        localStorage.removeItem('wad_auth');
+        window.location.reload();
+    });
 
     // Guide Toggle
     document.getElementById('btnToggleGuide').addEventListener('click', () => {
@@ -132,6 +140,7 @@ function saveConfig() {
     config.sendWebhookUrl = document.getElementById('configWebhookUrl').value.trim();
     config.authHeader = document.getElementById('configAuthHeader').value.trim();
     config.pollIntervalSeconds = parseInt(document.getElementById('configPollInterval').value, 10);
+    config.pin = document.getElementById('configPin').value.trim() || 'svmn8n151';
 
     localStorage.setItem('wad_config', JSON.stringify(config));
     hideSettings();
@@ -148,6 +157,7 @@ function showSettings() {
     document.getElementById('configWebhookUrl').value = config.sendWebhookUrl;
     document.getElementById('configAuthHeader').value = config.authHeader;
     document.getElementById('configPollInterval').value = config.pollIntervalSeconds;
+    document.getElementById('configPin').value = config.pin || 'svmn8n151';
     DOM.settingsModal.classList.add('active');
 }
 
@@ -423,6 +433,11 @@ function formatRelativeTime(dateString) {
 
 function selectContact(id) {
     state.activeContactId = id;
+    
+    // Mark as read
+    state.readTimestamps[id] = new Date().toISOString();
+    localStorage.setItem('wad_read_timestamps', JSON.stringify(state.readTimestamps));
+
     const contact = state.contacts.find(c => c.id === id);
 
     // Update Header
@@ -470,6 +485,16 @@ function renderSidebar() {
     const html = filtered.map(c => {
         const isActive = c.id === state.activeContactId ? 'active' : '';
 
+        if (c.id === state.activeContactId) {
+            state.readTimestamps[c.id] = new Date().toISOString();
+            localStorage.setItem('wad_read_timestamps', JSON.stringify(state.readTimestamps));
+        }
+
+        const lastRead = state.readTimestamps[c.id];
+        // Ensure that new contacts or contacts with new messages that haven't been read show as unread
+        const isUnread = c.id !== state.activeContactId && c.updated_at && (!lastRead || new Date(c.updated_at) > new Date(lastRead));
+        const unreadIndicator = isUnread ? '<div class="unread-dot"></div>' : '';
+
         return `
         <div class="contact-item ${isActive}" onclick="selectContact('${c.id}')">
             <div class="avatar">${getInitials(c.name)}</div>
@@ -480,6 +505,7 @@ function renderSidebar() {
                 </div>
                 <div class="contact-bottom">
                     <span class="contact-preview">${c.phone}</span>
+                    ${unreadIndicator}
                 </div>
             </div>
         </div>
@@ -601,12 +627,13 @@ function loadDemoData() {
 }
 
 function checkPinAuth() {
+    loadConfig();
     const pinOverlay = document.getElementById('pinOverlay');
     const pinInput = document.getElementById('pinInput');
     const btnUnlock = document.getElementById('btnUnlock');
     
-    // Use sessionStorage so they don't have to re-enter if they just refresh the tab
-    if (sessionStorage.getItem('wad_auth') === 'true') {
+    // Use localStorage so they don't have to re-enter if they shut down their PC
+    if (localStorage.getItem('wad_auth') === 'true') {
         pinOverlay.style.display = 'none';
         init();
         return;
@@ -616,8 +643,8 @@ function checkPinAuth() {
     setTimeout(() => pinInput.focus(), 100);
     
     function attemptUnlock() {
-        if (pinInput.value === 'svmn8n151') {
-            sessionStorage.setItem('wad_auth', 'true');
+        if (pinInput.value === (config.pin || 'svmn8n151')) {
+            localStorage.setItem('wad_auth', 'true');
             pinOverlay.style.display = 'none';
             init();
         } else {
